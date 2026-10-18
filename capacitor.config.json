@@ -1,0 +1,6 @@
+{
+  "appId": "com.example.myagent",
+  "appName": "مساعدي",
+  "webDir": "www",
+  "android": { "allowMixedContent": false }
+}

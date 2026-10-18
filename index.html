@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مساعدي</title>
+<style>
+:root{--side:max(12px,env(safe-area-inset-left,0px));--sider:max(12px,env(safe-area-inset-right,0px));--bg:#e8ede4;--panel:#f6f8f3;--ink:#14231c;--mute:#5d6b63;--me:#1f3d33;--me-ink:#f6f8f3;--accent:#3a3ad8;--line:#cfd7ca;--err:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1713;--panel:#17221c;--ink:#e6ede8;--mute:#8c9b92;--me:#3a3ad8;--me-ink:#fff;--accent:#8c8cff;--line:#26352c;--err:#ff8a80}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:'HarmonyOS Sans','HarmonyOS Sans Arabic','Noto Sans Arabic',system-ui,sans-serif;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--line)}
+header h1{font-size:18px;margin:0}
+button{font:inherit;cursor:pointer}
+.icon{background:none;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:6px 12px}
+#log{flex:1;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:88%;padding:10px 14px;border-radius:16px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.me{align-self:flex-start;background:var(--me);color:var(--me-ink);border-bottom-right-radius:4px}
+.bot{align-self:flex-end;background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:4px}
+.tool{align-self:flex-end;font-size:13px;color:var(--mute);border:1px dashed var(--line);border-radius:10px;padding:4px 10px}
+.err{color:var(--err)}
+.msg img,.msg audio{max-width:100%;border-radius:10px;margin-top:6px;display:block}
+.msg a{color:var(--accent)}
+footer{border-top:1px solid var(--line);padding:8px 10px;background:var(--panel)}
+#chip{font-size:13px;color:var(--mute);padding:0 4px 6px;display:none}
+.row{display:flex;gap:8px;align-items:flex-end}
+textarea{flex:1;resize:none;font:inherit;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:14px;padding:10px 12px;max-height:120px}
+#send{background:var(--accent);color:#fff;border:0;border-radius:14px;padding:10px 16px;font-weight:700}
+#send:disabled{opacity:.5}
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--ink);width:min(92vw,420px)}
+dialog label{display:block;margin:10px 0 4px;font-size:14px}
+dialog input{width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);direction:ltr}
+dialog p{font-size:13px;color:var(--mute)}
+
+header,#log,footer{padding-left:var(--side);padding-right:var(--sider)}
+body{align-items:stretch}
+.msg,.tool{max-width:min(88%,720px)}
+.me{align-self:flex-start}.bot,.tool{align-self:flex-end}
+button,.icon{min-height:44px}
+textarea{font-size:16px}
+@media (min-width:700px){
+  html{font-size:18px}
+  header h1{font-size:22px}
+  #log{padding-top:20px;gap:14px}
+  .msg{padding:12px 18px;border-radius:20px}
+  .msg img{max-height:50vh;width:auto}
+  footer{padding-top:12px;padding-bottom:12px}
+}
+@media (min-width:900px){
+  header,#log,footer{padding-left:max(var(--side),calc((100vw - 860px)/2));padding-right:max(var(--sider),calc((100vw - 860px)/2))}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>مساعدي</h1>
+  <div><button class="icon" id="clear">جديد</button> <button class="icon" id="gear">الإعدادات</button></div>
+</header>
+<div id="log"></div>
+<footer>
+  <div id="chip"></div>
+  <div class="row">
+    <button class="icon" id="attach" aria-label="إرفاق ملف">+</button>
+    <textarea id="input" rows="1" placeholder="اكتب طلبك…"></textarea>
+    <button id="send">إرسال</button>
+  </div>
+  <input type="file" id="file" accept="image/*,audio/*" hidden>
+</footer>
+
+<dialog id="settings">
+  <h3 style="margin:0">الإعدادات</h3>
+  <label>مفتاح Claude API</label>
+  <input id="key" type="password" placeholder="sk-ant-...">
+  <label>الموديل</label>
+  <input id="model" value="claude-sonnet-5-5">
+  <p>المفتاح بيتحفظ على التليفون بس. للاستخدام الشخصي فقط.</p>
+  <button class="icon" id="save">حفظ</button>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const log = $('#log');
+const store = {
+  get(k, d){ try { return localStorage.getItem(k) ?? d } catch(e){ return d } },
+  set(k, v){ try { localStorage.setItem(k, v) } catch(e){} }
+};
+let history = [];
+let attached = null; // {kind:'image'|'audio', url, name, blob}
+let busy = false;
+
+/* ---------- واجهة ---------- */
+function add(cls, text){
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.textContent = text;
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+  return d;
+}
+function note(text){
+  const d = document.createElement('div');
+  d.className = 'tool'; d.textContent = text;
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+$('#gear').onclick = () => { $('#key').value = store.get('key',''); $('#model').value = store.get('model','claude-sonnet-5-5'); $('#settings').showModal(); };
+$('#save').onclick = () => { store.set('key', $('#key').value.trim()); store.set('model', $('#model').value.trim()); $('#settings').close(); };
+$('#clear').onclick = () => { history = []; attached = null; $('#chip').style.display='none'; log.innerHTML=''; add('bot','أهلاً! اطلب مني: افتح تطبيق، جهّز إيميل، عدّل صورة، قصّ صوت.'); };
+$('#attach').onclick = () => $('#file').click();
+$('#file').onchange = e => {
+  const f = e.target.files[0]; if(!f) return;
+  attached = { kind: f.type.startsWith('audio') ? 'audio' : 'image', url: URL.createObjectURL(f), name: f.name, blob: f };
+  const c = $('#chip'); c.textContent = 'مرفق: ' + f.name; c.style.display = 'block';
+  e.target.value = '';
+};
+$('#input').addEventListener('input', e => { e.target.style.height='auto'; e.target.style.height = Math.min(e.target.scrollHeight,120)+'px'; });
+
+/* ---------- أدوات ---------- */
+const TOOLS = [
+  { name:'open_link', description:'يفتح رابط أو تطبيق على التليفون. أمثلة: https://... ، whatsapp://send?text=..، tel:+20.. ، geo:0,0?q=مكان ، https://www.youtube.com/results?search_query=..',
+    input_schema:{type:'object',properties:{url:{type:'string'}},required:['url']} },
+  { name:'compose_email', description:'يجهّز إيميل في تطبيق البريد على التليفون (المستخدم يضغط إرسال بنفسه).',
+    input_schema:{type:'object',properties:{to:{type:'string'},subject:{type:'string'},body:{type:'string'}},required:['body']} },
+  { name:'edit_image', description:'يعدّل الصورة المرفقة. operations قائمة مرتبة. أنواع: resize{width,height}, crop{x,y,width,height}, rotate{degrees}, flip{axis:"h"|"v"}, grayscale, brightness{value 0-2}, contrast{value 0-2}, saturate{value 0-3}, blur{px}, sepia.',
+    input_schema:{type:'object',properties:{operations:{type:'array',items:{type:'object',properties:{type:{type:'string'},width:{type:'number'},height:{type:'number'},x:{type:'number'},y:{type:'number'},degrees:{type:'number'},axis:{type:'string'},value:{type:'number'},px:{type:'number'}},required:['type']}}},required:['operations']} },
+  { name:'edit_audio', description:'يعدّل الملف الصوتي المرفق: قص من ثانية لثانية، تغيير مستوى الصوت (gain)، وتغيير السرعة (speed).',
+    input_schema:{type:'object',properties:{start_sec:{type:'number'},end_sec:{type:'number'},gain:{type:'number'},speed:{type:'number'}}} },
+];
+
+async function runTool(name, a){
+  if(name === 'open_link'){ window.open(a.url, '_system'); location.href = a.url; return 'تم فتح: ' + a.url; }
+  if(name === 'compose_email'){
+    const u = 'mailto:' + encodeURIComponent(a.to||'') + '?subject=' + encodeURIComponent(a.subject||'') + '&body=' + encodeURIComponent(a.body||'');
+    location.href = u; return 'تم تجهيز الإيميل في تطبيق البريد، المستخدم لسه هيضغط إرسال.';
+  }
+  if(name === 'edit_image') return await editImage(a.operations||[]);
+  if(name === 'edit_audio') return await editAudio(a);
+  return 'أداة غير معروفة';
+}
+
+function loadImg(url){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; }); }
+
+async function editImage(ops){
+  if(!attached || attached.kind!=='image') return 'خطأ: مفيش صورة مرفقة.';
+  const img = await loadImg(attached.url);
+  let cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+  cv.getContext('2d').drawImage(img,0,0);
+  for(const o of ops){
+    const w = cv.width, h = cv.height, n = document.createElement('canvas'); let c;
+    if(o.type==='resize'){ n.width=o.width||w; n.height=o.height||Math.round(h*(o.width||w)/w); c=n.getContext('2d'); c.drawImage(cv,0,0,n.width,n.height); }
+    else if(o.type==='crop'){ n.width=o.width; n.height=o.height; c=n.getContext('2d'); c.drawImage(cv,o.x||0,o.y||0,o.width,o.height,0,0,o.width,o.height); }
+    else if(o.type==='rotate'){ const r=(o.degrees||0)*Math.PI/180, s=Math.abs(Math.sin(r)), k=Math.abs(Math.cos(r)); n.width=Math.round(w*k+h*s); n.height=Math.round(w*s+h*k); c=n.getContext('2d'); c.translate(n.width/2,n.height/2); c.rotate(r); c.drawImage(cv,-w/2,-h/2); }
+    else if(o.type==='flip'){ n.width=w; n.height=h; c=n.getContext('2d'); if(o.axis==='v'){c.translate(0,h);c.scale(1,-1)}else{c.translate(w,0);c.scale(-1,1)} c.drawImage(cv,0,0); }
+    else { const f = {grayscale:'grayscale(1)',sepia:'sepia(1)',brightness:`brightness(${o.value??1})`,contrast:`contrast(${o.value??1})`,saturate:`saturate(${o.value??1})`,blur:`blur(${o.px??2}px)`}[o.type]; if(!f) continue; n.width=w; n.height=h; c=n.getContext('2d'); c.filter=f; c.drawImage(cv,0,0); }
+    cv = n;
+  }
+  const blob = await new Promise(r => cv.toBlob(r,'image/png'));
+  const url = URL.createObjectURL(blob);
+  attached = { kind:'image', url, name:'edited.png', blob };
+  showResult('image', url, 'edited.png');
+  return `تم التعديل. الأبعاد الجديدة ${cv.width}×${cv.height}. النتيجة معروضة للمستخدم مع زر حفظ.`;
+}
+
+async function editAudio(a){
+  if(!attached || attached.kind!=='audio') return 'خطأ: مفيش ملف صوتي مرفق.';
+  const ac = new (window.AudioContext||window.webkitAudioContext)();
+  const buf = await ac.decodeAudioData(await attached.blob.arrayBuffer());
+  const sr = buf.sampleRate, s = Math.max(0,a.start_sec||0), e = Math.min(buf.duration, a.end_sec||buf.duration), speed = a.speed||1, gain = a.gain??1;
+  if(e<=s) return 'خطأ: وقت النهاية لازم يكون بعد البداية.';
+  const off = new OfflineAudioContext(buf.numberOfChannels, Math.ceil((e-s)/speed*sr), sr);
+  const src = off.createBufferSource(); src.buffer = buf; src.playbackRate.value = speed;
+  const g = off.createGain(); g.gain.value = gain; src.connect(g).connect(off.destination);
+  src.start(0, s, e-s);
+  const out = await off.startRendering();
+  const blob = toWav(out), url = URL.createObjectURL(blob);
+  attached = { kind:'audio', url, name:'edited.wav', blob };
+  showResult('audio', url, 'edited.wav');
+  return `تم التعديل. المدة الجديدة ${out.duration.toFixed(1)} ثانية. النتيجة معروضة للمستخدم.`;
+}
+function toWav(b){
+  const ch=b.numberOfChannels, len=b.length*ch*2, v=new DataView(new ArrayBuffer(44+len));
+  const w=(o,s)=>[...s].forEach((c,i)=>v.setUint8(o+i,c.charCodeAt(0)));
+  w(0,'RIFF'); v.setUint32(4,36+len,true); w(8,'WAVEfmt '); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,ch,true);
+  v.setUint32(24,b.sampleRate,true); v.setUint32(28,b.sampleRate*ch*2,true); v.setUint16(32,ch*2,true); v.setUint16(34,16,true); w(36,'data'); v.setUint32(40,len,true);
+  let p=44; for(let i=0;i<b.length;i++) for(let c=0;c<ch;c++){ const x=Math.max(-1,Math.min(1,b.getChannelData(c)[i])); v.setInt16(p,x<0?x*0x8000:x*0x7fff,true); p+=2; }
+  return new Blob([v],{type:'audio/wav'});
+}
+function showResult(kind, url, name){
+  const d = add('bot',''); 
+  const el = document.createElement(kind==='image'?'img':'audio'); el.src = url; if(kind==='audio') el.controls = true;
+  const a = document.createElement('a'); a.href = url; a.download = name; a.textContent = 'حفظ الملف';
+  d.append(el, a); log.scrollTop = log.scrollHeight;
+}
+
+/* ---------- الـ agent ---------- */
+const SYSTEM = 'انت مساعد شخصي على تليفون أندرويد. رد بالعامية المصرية باختصار. استخدم الأدوات المتاحة لما المستخدم يطلب فتح تطبيق أو رابط أو تجهيز إيميل أو تعديل صورة أو صوت. لو الطلب محتاج أداة مش موجودة (زي قراءة الإيميلات أو Google Sheets) قول للمستخدم إن الأداة دي لسه مش متوصلة.';
+
+async function toJpegB64(blob){
+  const img = await loadImg(URL.createObjectURL(blob)); const k = Math.min(1, 1024/Math.max(img.width,img.height));
+  const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+  c.getContext('2d').drawImage(img,0,0,c.width,c.height); return c.toDataURL('image/jpeg',.8).split(',')[1];
+}
+
+async function callClaude(){
+  const key = store.get('key','');
+  if(!key) throw new Error('حط مفتاح الـ API من الإعدادات الأول.');
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body: JSON.stringify({ model: store.get('model','claude-sonnet-5-5'), max_tokens: 2000, system: SYSTEM, tools: TOOLS, messages: history })
+  });
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.error?.message || 'خطأ في الاتصال');
+  return j;
+}
+
+async function send(){
+  const input = $('#input'), text = input.value.trim();
+  if((!text && !attached) || busy) return;
+  busy = true; $('#send').disabled = true;
+  const content = [];
+  if(attached?.kind==='image') content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:await toJpegB64(attached.blob)}});
+  if(attached) content.push({type:'text',text:`[مرفق: ${attached.kind==='image'?'صورة':'ملف صوتي'} باسم ${attached.name}]`});
+  content.push({type:'text',text:text||'(بدون نص)'});
+  history.push({role:'user',content});
+  add('me', text || '(مرفق)'); input.value=''; input.style.height='auto'; $('#chip').style.display='none';
+  try{
+    for(let i=0;i<8;i++){
+      const res = await callClaude();
+      history.push({role:'assistant',content:res.content});
+      res.content.filter(b=>b.type==='text'&&b.text.trim()).forEach(b=>add('bot',b.text));
+      const calls = res.content.filter(b=>b.type==='tool_use');
+      if(!calls.length) break;
+      const results = [];
+      for(const c of calls){
+        note('⚙ ' + c.name);
+        let out; try{ out = await runTool(c.name, c.input) }catch(e){ out = 'خطأ: ' + e.message }
+        results.push({type:'tool_result',tool_use_id:c.id,content:String(out)});
+      }
+      history.push({role:'user',content:results});
+    }
+  }catch(e){ add('bot err', e.message) }
+  busy = false; $('#send').disabled = false;
+}
+$('#send').onclick = send;
+add('bot','أهلاً! اطلب مني: افتح تطبيق، جهّز إيميل، عدّل صورة، قصّ صوت.\nأول مرة؟ افتح الإعدادات وحط مفتاح Claude API.');
+</script>
+</body>
+</html>
